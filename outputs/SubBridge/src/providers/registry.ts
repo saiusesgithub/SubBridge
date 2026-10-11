@@ -20,8 +20,18 @@ export class ProviderRegistry {
   readonly providers = new Map<ProviderId, Provider>();
   private executables: Partial<Record<ProviderId, Executable>> = {};
   private statuses: ProviderStatus[] = [];
+  private refreshedAt = 0;
+  private refreshing: Promise<ProviderStatus[]> | undefined;
 
   async refresh(): Promise<ProviderStatus[]> {
+    if (this.statuses.length && Date.now() - this.refreshedAt < 5_000) return this.list();
+    if (this.refreshing) return this.refreshing;
+    this.refreshing = this.refreshNow();
+    try { return await this.refreshing; }
+    finally { this.refreshing = undefined; }
+  }
+
+  private async refreshNow(): Promise<ProviderStatus[]> {
     this.executables = await detectProviderBinaries();
     this.providers.clear();
     const codex = this.executables.codex ?? null;
@@ -58,6 +68,7 @@ export class ProviderRegistry {
     }
 
     this.statuses = [codexStatus, claudeStatus, ollamaStatus];
+    this.refreshedAt = Date.now();
     return structuredClone(this.statuses);
   }
 

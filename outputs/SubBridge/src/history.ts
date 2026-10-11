@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ProviderId } from "./providers/types.js";
+import type { ProviderId, UsageMetrics } from "./providers/types.js";
 
 export interface HistoryRecord {
   id: string;
@@ -9,6 +9,10 @@ export interface HistoryRecord {
   provider: ProviderId;
   model: string;
   durationMs: number;
+  providerDurationMs?: number;
+  streaming?: boolean;
+  streamingStatus?: "off" | "completed" | "interrupted";
+  usage?: UsageMetrics;
   outcome: "success" | "error" | "cancelled";
   prompt?: string;
   response?: string;

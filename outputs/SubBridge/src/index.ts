@@ -8,6 +8,8 @@ import { config } from "./config.js";
 import { HistoryStore } from "./history.js";
 import { ProviderError } from "./providers/codex-cli.js";
 import { ProviderRegistry } from "./providers/registry.js";
+import { ModelCatalog, modelsResponse, providerId } from "./providers/models.js";
+import type { ProviderCompletion, UsageMetrics } from "./providers/types.js";
 import { validateRequest, type ProviderId } from "./providers/types.js";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -15,6 +17,7 @@ const webRoot = resolve(here, "../web/dist");
 
 export async function createApp(options: { registry?: ProviderRegistry; history?: HistoryStore; token?: string } = {}): Promise<FastifyInstance> {
   const registry = options.registry ?? new ProviderRegistry();
+  const modelCatalog = new ModelCatalog(registry);
   const history = options.history ?? new HistoryStore(config.historyMode);
   const token = options.token ?? config.gatewayToken;
   const app = Fastify({ logger: true, bodyLimit: config.maxBodyBytes, requestTimeout: config.requestTimeoutMs, trustProxy: false });
@@ -66,6 +69,12 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
   app.get("/health", async () => ({ status: "ok" }));
 
   app.get("/v1/providers", async () => ({ object: "list", data: await registry.refresh() }));
+  app.get<{ Querystring: { provider?: string } }>("/v1/models", async (request, reply) => {
+    const selected = request.query.provider;
+    if (selected !== undefined && !providerId(selected)) return reply.code(400).send({ error: { message: "provider must be codex, claude, or ollama", type: "invalid_request_error" } });
+    await registry.refresh();
+    return modelsResponse(await modelCatalog.list(providerId(selected)), providerId(selected));
+  });
   app.get<{ Params: { id: string } }>("/v1/providers/:id/status", async (request, reply) => {
     if (!["codex", "claude", "ollama"].includes(request.params.id)) return reply.code(404).send({ error: { message: "Unknown provider", type: "invalid_request_error" } });
     await registry.refresh();
@@ -105,6 +114,8 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
     let release: (() => void) | undefined;
     let outcome: "success" | "error" | "cancelled" = "error";
     let responseText = "";
+    let providerDurationMs: number | undefined;
+    let usage: UsageMetrics | undefined;
     const cancelOnDisconnect = () => { if (!reply.raw.writableEnded) controller.abort(new Error("Client disconnected")); };
     request.raw.on("aborted", cancelOnDisconnect);
     reply.raw.on("close", cancelOnDisconnect);
@@ -117,17 +128,32 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
         const send = (value: unknown) => { if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(value)}\n\n`); };
         const chunk = (delta: Record<string, unknown>, finishReason: string | null = null) => ({ id: `chatcmpl-${id}`, object: "chat.completion.chunk", created, model: input.model, choices: [{ index: 0, delta, finish_reason: finishReason }] });
         send(chunk({ role: "assistant" }));
-        responseText = await provider.stream!(input, controller.signal, (text) => { responseText += text; send(chunk({ content: text })); });
+        const streamed: ProviderCompletion = provider.streamWithMetrics
+          ? await provider.streamWithMetrics(input, controller.signal, (text) => { responseText += text; send(chunk({ content: text })); })
+          : { content: await provider.stream!(input, controller.signal, (text) => { responseText += text; send(chunk({ content: text })); }), providerDurationMs: NaN };
+        responseText = streamed.content;
+        providerDurationMs = Number.isFinite(streamed.providerDurationMs) ? streamed.providerDurationMs : undefined;
+        usage = streamed.usage;
         // The provider callback is the source of incremental text; use the returned final text for history only.
         outcome = "success";
-        send(chunk({}, "stop"));
+        const totalDurationMs = Date.now() - started;
+        const openAiUsage = usage ? { prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens, total_tokens: usage.totalTokens } : null;
+        send({ ...chunk({}, "stop"), subbridge_metrics: { totalDurationMs, providerDurationMs: providerDurationMs ?? null, usage: openAiUsage, provider: providerId, model: input.model, streaming: providerId === "codex" ? "final-response-only" : "incremental" } });
         if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write("data: [DONE]\n\n");
       } else {
-        responseText = await provider.complete(input, controller.signal);
+        const completed: ProviderCompletion = provider.completeWithMetrics
+          ? await provider.completeWithMetrics(input, controller.signal)
+          : { content: await provider.complete(input, controller.signal), providerDurationMs: NaN };
+        responseText = completed.content;
+        providerDurationMs = Number.isFinite(completed.providerDurationMs) ? completed.providerDurationMs : undefined;
+        usage = completed.usage;
         outcome = "success";
+        reply.header("x-subbridge-request-duration-ms", String(Date.now() - started));
+        if (providerDurationMs !== undefined) reply.header("x-subbridge-provider-duration-ms", String(providerDurationMs));
         return {
           id: `chatcmpl-${id}`, object: "chat.completion", created, model: input.model,
-          choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }]
+          choices: [{ index: 0, message: { role: "assistant", content: responseText }, finish_reason: "stop" }],
+          ...(usage ? { usage: { prompt_tokens: usage.promptTokens, completion_tokens: usage.completionTokens, total_tokens: usage.totalTokens } } : {})
         };
       }
     } catch (error) {
@@ -149,7 +175,7 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
       clearTimeout(timer);
       request.raw.off("aborted", cancelOnDisconnect);
       reply.raw.off("close", cancelOnDisconnect);
-      try { await history.add({ id, timestamp: new Date(started).toISOString(), provider: providerId, model: input.model, durationMs: Date.now() - started, outcome, prompt: input.messages.map((message) => `${message.role}: ${message.content}`).join("\n\n"), response: responseText }); }
+      try { await history.add({ id, timestamp: new Date(started).toISOString(), provider: providerId, model: input.model, durationMs: Date.now() - started, ...(providerDurationMs !== undefined ? { providerDurationMs } : {}), streaming: input.stream === true, streamingStatus: input.stream ? outcome === "success" ? "completed" : outcome === "cancelled" ? "interrupted" : "interrupted" : "off", ...(usage ? { usage } : {}), outcome, prompt: input.messages.map((message) => `${message.role}: ${message.content}`).join("\n\n"), response: responseText }); }
       catch (error) { request.log.warn({ error: error instanceof Error ? error.name : "storage_error" }, "Could not save local request history"); }
       release?.();
       if (input.stream && !reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.end();

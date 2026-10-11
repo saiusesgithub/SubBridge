@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Executable } from "./discovery.js";
-import type { ChatCompletionRequest, Provider, ProviderCapabilities } from "./types.js";
+import type { ChatCompletionRequest, Provider, ProviderCapabilities, ProviderCompletion, UsageMetrics } from "./types.js";
 
 export class ProviderError extends Error {
   constructor(message: string, readonly kind: "unavailable" | "auth-required" | "timeout" | "error") { super(message); }
@@ -33,6 +33,7 @@ function finalTextFromEvent(event: unknown): string | null {
 export class CodexJsonlCollector {
   private pending = "";
   private finalText: string | null = null;
+  private usage: UsageMetrics | undefined;
   private size = 0;
 
   push(chunk: string): void {
@@ -53,10 +54,21 @@ export class CodexJsonlCollector {
     return this.finalText;
   }
 
+  getUsage(): UsageMetrics | undefined { return this.usage ? { ...this.usage } : undefined; }
+
   private consume(line: string): void {
     if (!line.trim()) return;
     try {
-      const text = finalTextFromEvent(JSON.parse(line) as unknown);
+      const event = JSON.parse(line) as unknown;
+      const row = event && typeof event === "object" ? event as { type?: unknown; usage?: Record<string, unknown> } : undefined;
+      if (row?.type === "turn.completed" && row.usage) {
+        const input = row.usage.input_tokens;
+        const output = row.usage.output_tokens;
+        if (Number.isSafeInteger(input) && Number.isSafeInteger(output) && Number(input) >= 0 && Number(output) >= 0) {
+          this.usage = { promptTokens: Number(input), completionTokens: Number(output), totalTokens: Number(input) + Number(output) };
+        }
+      }
+      const text = finalTextFromEvent(event);
       if (text !== null) this.finalText = text;
     } catch { /* Progress and malformed lines are ignored; the final-message file remains authoritative. */ }
   }
@@ -65,11 +77,24 @@ export class CodexJsonlCollector {
 export class CodexCliProvider implements Provider {
   readonly id = "codex" as const;
   readonly capabilities: ProviderCapabilities = { completion: true, streaming: true, models: [], auth: "codex-cli" };
+  private lastUsage: UsageMetrics | undefined;
 
   constructor(private readonly executable: Executable, private readonly timeoutMs = 120_000) {}
 
   complete(request: ChatCompletionRequest, signal: AbortSignal): Promise<string> {
     return this.execute(request, signal, false, () => undefined);
+  }
+
+  async completeWithMetrics(request: ChatCompletionRequest, signal: AbortSignal): Promise<ProviderCompletion> {
+    const started = performance.now();
+    const content = await this.execute(request, signal, false, () => undefined);
+    return { content, ...(this.lastUsage ? { usage: this.lastUsage } : {}), providerDurationMs: performance.now() - started };
+  }
+
+  async streamWithMetrics(request: ChatCompletionRequest, signal: AbortSignal, onText: (text: string) => void): Promise<ProviderCompletion> {
+    const started = performance.now();
+    const content = await this.execute(request, signal, true, onText);
+    return { content, ...(this.lastUsage ? { usage: this.lastUsage } : {}), providerDurationMs: performance.now() - started };
   }
 
   stream(request: ChatCompletionRequest, signal: AbortSignal, onText: (text: string) => void): Promise<string> {
@@ -128,6 +153,8 @@ export class CodexCliProvider implements Provider {
         child.once("error", () => reject(new ProviderError("Codex executable could not be started. Check CODEX_COMMAND and its native binary path.", "unavailable")));
         child.once("close", async (code) => {
           const finalEventText = collector.finish();
+          const usage = collector.getUsage();
+          this.lastUsage = usage;
           if (outputExceeded) { reject(new ProviderError("Codex JSONL output exceeded the 1 MiB limit.", "error")); return; }
           if (code !== 0) {
             const lower = stderr.toLowerCase();

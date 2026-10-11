@@ -21,6 +21,28 @@ export interface ProviderCapabilities {
   auth: "codex-cli" | "local-no-auth" | "provider-policy-restricted" | "unknown";
 }
 
+export interface UsageMetrics {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ProviderCompletion {
+  content: string;
+  usage?: UsageMetrics;
+  providerDurationMs: number;
+}
+
+export interface DiscoveredModel {
+  id: string;
+  object: "model";
+  owned_by: ProviderId;
+  display_name: string;
+  provider: ProviderId;
+  available: true;
+  capabilities: { completion: boolean; streaming: boolean };
+}
+
 export interface ProviderStatus {
   id: ProviderId;
   name: string;
@@ -39,6 +61,8 @@ export interface Provider {
   readonly capabilities: ProviderCapabilities;
   complete(request: ChatCompletionRequest, signal: AbortSignal): Promise<string>;
   stream?(request: ChatCompletionRequest, signal: AbortSignal, onText: (text: string) => void): Promise<string>;
+  completeWithMetrics?(request: ChatCompletionRequest, signal: AbortSignal): Promise<ProviderCompletion>;
+  streamWithMetrics?(request: ChatCompletionRequest, signal: AbortSignal, onText: (text: string) => void): Promise<ProviderCompletion>;
 }
 
 export type ValidationResult = ChatCompletionRequest | string;

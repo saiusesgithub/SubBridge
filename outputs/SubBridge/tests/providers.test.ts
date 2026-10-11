@@ -62,11 +62,12 @@ test("Codex auth status mapping does not return captured CLI output", () => {
   assert.equal(mapCodexAuthResult(true, null, "").state, "error");
 });
 
-test("Codex JSONL parser handles partial lines and emits completed agent text, not progress", () => {
+test("Codex JSONL parser handles partial lines, final text, and documented turn usage", () => {
   const parser = new CodexJsonlCollector();
   parser.push('{"type":"turn.started"}\n{"type":"item.updated","item":{"type":"agent_message","text":"not final"}}\n{"type":"item.completed","item":{"type":"agent_message","text":"final ');
-  parser.push('answer"}}\n{"type":"turn.completed"}');
+  parser.push('answer"}}\n{"type":"turn.completed","usage":{"input_tokens":8,"cached_input_tokens":2,"output_tokens":3}}');
   assert.equal(parser.finish(), "final answer");
+  assert.deepEqual(parser.getUsage(), { promptTokens: 8, completionTokens: 3, totalTokens: 11 });
 });
 
 test("Codex command arguments disable model shell/tool execution and use stdin for prompt text", () => {
@@ -92,15 +93,24 @@ test("Ollama adapter parses JSON and incremental NDJSON text without simulating 
   const pieces: string[] = [];
   const request = { model: "local-model", provider: "ollama" as const, stream: false, messages: [{ role: "user" as const, content: "hello" }] };
   try {
-    globalThis.fetch = async () => new Response(JSON.stringify({ message: { content: "plain answer" } }), { status: 200 });
-    assert.equal(await provider.complete(request, new AbortController().signal), "plain answer");
+    globalThis.fetch = async () => new Response(JSON.stringify({ message: { content: "plain answer" }, prompt_eval_count: 6, eval_count: 4, total_duration: 32_000_000 }), { status: 200 });
+    const plain = await provider.completeWithMetrics(request, new AbortController().signal);
+    assert.equal(plain.content, "plain answer");
+    assert.deepEqual(plain.usage, { promptTokens: 6, completionTokens: 4, totalTokens: 10 });
+    assert.equal(plain.providerDurationMs, 32);
+    globalThis.fetch = async () => new Response(JSON.stringify({ message: { content: "answer" } }), { status: 200 });
+    assert.equal((await provider.completeWithMetrics(request, new AbortController().signal)).usage, undefined);
     globalThis.fetch = async () => new Response(new ReadableStream({ start(controller) {
-      controller.enqueue(new TextEncoder().encode('{"message":{"content":"first"}}\n{"message":{"content":" second"},"done":false}\n'));
+      controller.enqueue(new TextEncoder().encode('{"message":{"content":"first"}}\n{"message":{"content":" second"},"done":false}\n{"done":true,"prompt_eval_count":4,"eval_count":3,"total_duration":20000000}\n'));
       controller.close();
     } }), { status: 200 });
     const streamed = await provider.stream({ ...request, stream: true }, new AbortController().signal, (piece) => pieces.push(piece));
     assert.equal(streamed, "first second");
     assert.deepEqual(pieces, ["first", " second"]);
+    const measured = await provider.streamWithMetrics({ ...request, stream: true }, new AbortController().signal, () => undefined);
+    assert.equal(measured.content, "first second");
+    assert.deepEqual(measured.usage, { promptTokens: 4, completionTokens: 3, totalTokens: 7 });
+    assert.equal(measured.providerDurationMs, 20);
   } finally { globalThis.fetch = originalFetch; }
 });
 
