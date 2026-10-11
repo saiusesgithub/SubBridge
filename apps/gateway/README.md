@@ -32,7 +32,7 @@ npm install
 npm run setup
 ```
 
-The wizard discovers native provider executables, recommends the loopback listener, generates a random gateway token, and writes local settings to `.env`. History is metadata-only unless you explicitly select full prompt/response history. The wizard prints the token once; the server also prints its configured local token when it starts. Keep both private.
+The wizard discovers native provider executables, recommends the loopback listener, generates a random gateway token, and writes local settings to `.env`. History is metadata-only unless you explicitly select full prompt/response history. The token is stored in the local config file and is not printed by the server. Keep the config file private.
 
 Start development mode (API on `127.0.0.1:8787`, dashboard on `127.0.0.1:5173`):
 

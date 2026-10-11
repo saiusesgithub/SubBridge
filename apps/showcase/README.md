@@ -23,7 +23,7 @@ npm run preview
 ## Deploy to Vercel
 
 1. Push this standalone showcase directory to a repository or monorepo when ready; no push is performed by this project task.
-2. In Vercel, import the repository and set **Root Directory** to `outputs/subbridge-showcase` (or the repository-relative location of this directory). Enable “Include files outside the root directory” only if your repo layout requires it; this site has no dependency on the core SubBridge source tree.
+2. In the existing Vercel project, set **Root Directory** to `apps/showcase`. This site is standalone and has no dependency on the gateway source tree.
 3. Use the Vite framework preset, install command `npm install`, build command `npm run build`, and output directory `dist`.
 4. Optionally configure public URLs:
    - `VITE_GITHUB_URL` — the real source repository URL once available.
@@ -32,6 +32,8 @@ npm run preview
 5. Redeploy after changing environment variables. Do not add `SUBBRIDGE_TOKEN`, provider credentials, or private auth data. The Vercel frontend has no backend integration.
 
 `vercel.json` rewrites SPA paths to `index.html`. The site uses no server functions, telemetry, gateway endpoint, or provider credentials.
+
+For the full manual settings and a verification checklist, see [`../../docs/deployment.md`](../../docs/deployment.md). Changing the project root is a manual Vercel setting; no deployment is triggered by this repository change.
 
 ## Claims and limitations
 
