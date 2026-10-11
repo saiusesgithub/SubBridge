@@ -90,6 +90,8 @@ Codex model choices and availability are controlled by the installed Codex CLI a
 
 `GET /health` preserves the V1 unauthenticated health check and returns `{"status":"ok"}`. All `/v1/*` API routes require `Authorization: Bearer <SUBBRIDGE_TOKEN>`.
 
+For integration walkthroughs and complete JavaScript, Python, Next.js, FastAPI, curl, and chatbot examples, start at [docs/getting-started.md](docs/getting-started.md). The dashboard's Documentation page also includes a copyable SDK example.
+
 ```http
 POST /v1/chat/completions
 Authorization: Bearer your-local-token
@@ -105,7 +107,7 @@ Content-Type: application/json
 }
 ```
 
-`provider` is optional and defaults to `codex`, preserving V1 calls. Roles supported are `system`, `developer`, `user`, and `assistant`; content must be text. `stream` defaults to `false`. Tool calls, images/audio, function calling, multiple choices, sampling controls, and complete OpenAI response semantics are not implemented. Usage counts are omitted.
+`provider` is optional and defaults to `codex`, preserving V1 calls. Roles supported are `system`, `developer`, `user`, and `assistant`; content must be text. `stream` defaults to `false`. Tool calls, images/audio, function calling, multiple choices, sampling controls, and complete OpenAI response semantics are not implemented. Provider usage is included only when the adapter reports it accurately; server and provider durations are exposed in `X-SubBridge-Request-Duration-Ms` and `X-SubBridge-Provider-Duration-Ms` headers. Missing usage is omitted.
 
 The response keeps the minimal V1 form:
 
@@ -119,7 +121,7 @@ The response keeps the minimal V1 form:
 }
 ```
 
-`GET /v1/providers` returns verified installation, auth, capability, executable-path, version, and live Ollama model information. `GET /v1/providers/:id/status` refreshes one provider and returns its current state. States are `ready`, `not-installed`, `auth-required`, `unavailable`, `error`, and `unknown`.
+`GET /v1/providers` returns verified installation, auth, capability, executable-path, version, and live Ollama model information. `GET /v1/providers/:id/status` returns current provider state. `GET /v1/models` returns provider-advertised model IDs in an OpenAI-shaped list, with an optional `?provider=ollama` filter. Results are briefly cached. Codex does not provide a documented model-catalog command in the inspected CLI, so its catalog is empty; explicit model IDs still work. States are `ready`, `not-installed`, `auth-required`, `unavailable`, `error`, and `unknown`.
 
 `GET /v1/config` returns safe runtime settings and discovered executable paths without returning the gateway token. `GET /v1/history` returns local history. `DELETE /v1/history` clears it; `DELETE /v1/history/:id` removes one record. These routes require the gateway bearer token.
 
