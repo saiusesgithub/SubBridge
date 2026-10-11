@@ -247,3 +247,70 @@ npm test
 ```
 
 The tests cover REST auth and V1 response shape, host rebinding checks, SSE framing/chunk assembly, provider state mapping, executable verification, Windows shim rejection/vendor-path discovery, Ollama URL safety, and history privacy/deletion. End-to-end provider calls require a separately installed and authorized Codex CLI or running Ollama instance.
+# SubBridge
+
+SubBridge is a self-hosted, local-first AI gateway for supported locally installed provider tools. It exposes a small authenticated OpenAI-shaped Chat Completions subset while preserving provider-native login and usage rules. Cloud-backed providers can send prompts off-device; “local gateway” describes where the HTTP gateway runs, not where every model executes.
+
+## Quick start from a source checkout
+
+Requirements: Node.js 22.12 or newer.
+
+```sh
+npm install
+npm run setup
+npm run build
+npm start
+```
+
+The gateway binds to `127.0.0.1:8787` by default and serves the bundled dashboard at `http://127.0.0.1:8787`. Setup stores the generated bearer token in a private per-user configuration file and does not print it. Connect the dashboard with the `SUBBRIDGE_TOKEN` value from that file. For a locally packaged distribution use `npm pack`, then install the resulting tarball; this repository has not been published to npm, so public-registry `npx subbridge` is not available yet.
+
+## CLI
+
+```sh
+subbridge setup
+subbridge start
+subbridge doctor --json
+subbridge providers
+subbridge models
+subbridge status
+subbridge test --no-inference
+```
+
+`subbridge test` without `--no-inference` asks for confirmation and sends a real request that can consume provider allowance. `doctor`, provider discovery and model discovery do not run inference. Config is stored in the platform's per-user application configuration directory; `SUBBRIDGE_CONFIG_DIR` can override it.
+
+## API example
+
+```javascript
+import OpenAI from "openai";
+const client = new OpenAI({ baseURL: "http://127.0.0.1:8787/v1", apiKey: process.env.SUBBRIDGE_TOKEN });
+const response = await client.chat.completions.create({
+  model: process.env.SUBBRIDGE_MODEL, // choose an ID supported by your configured provider
+  messages: [{ role: "user", content: "Hello from my app!" }]
+});
+console.log(response.choices[0].message.content);
+```
+
+See [`docs/`](docs/getting-started.md), [`SUBMISSION.md`](SUBMISSION.md), [`DEMO.md`](DEMO.md), and [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md). Runnable official OpenAI SDK examples are in [`examples/openai-client`](examples/openai-client/README.md) and [`examples/python-client`](examples/python-client/README.md).
+
+## Providers and compatibility
+
+- **Codex CLI:** uses the user's supported local Codex login and CLI; Codex model discovery is not exposed as a documented catalog, so IDs are saved after successful requests or can be added manually. Codex SSE currently emits one final content event, not token-by-token output.
+- **Ollama:** uses its local HTTP API and can stream incremental text.
+- **Claude Code:** may be detected, but no adapter is implemented. Provider subscription compatibility is not implied.
+
+SubBridge supports basic text Chat Completions request/response, selected provider/model, bearer auth, and provider-supported streaming. It does not implement full OpenAI compatibility, tool calling, multimodal inputs, Responses API, or arbitrary OpenAI endpoints. Personal or open-source use does not override provider terms, authentication, licensing, rate limits, or subscription usage policies.
+
+## Security
+
+The default listener is loopback-only, protected routes require the local bearer token, and cross-origin/host checks are enforced. Adapters use bounded processes/requests and isolated execution; model output is never run as a command. No telemetry is included. Request history is metadata-only by default. Treat the gateway token as a secret and do not bind to public interfaces. For remote access, use a private network or SSH tunnel with appropriate host safeguards; a remote service's `127.0.0.1` refers to itself, not your workstation.
+
+## Development and verification
+
+```sh
+npm run dev
+npm run build
+npm test
+npm pack --dry-run
+```
+
+The SDK integration suite requires a running gateway and sends real provider requests. Read its README before running because requests can consume usage.

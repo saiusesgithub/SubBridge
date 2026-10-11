@@ -2,4 +2,13 @@ node_modules/
 dist/
 web/dist/
 .env
+.env.*
+!.env.example
 *.log
+*.db
+*.sqlite
+*.sqlite3
+*.tgz
+subbridge-history.json
+models.json
+.DS_Store

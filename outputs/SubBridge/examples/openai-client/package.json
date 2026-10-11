@@ -1,0 +1,7 @@
+{
+  "name": "subbridge-openai-sdk-example",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node client.mjs", "test:integration": "node integration-test.mjs" },
+  "dependencies": { "openai": "^5.20.0" }
+}

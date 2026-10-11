@@ -15,9 +15,9 @@ import { validateRequest, type ProviderId } from "./providers/types.js";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const webRoot = resolve(here, "../web/dist");
 
-export async function createApp(options: { registry?: ProviderRegistry; history?: HistoryStore; token?: string } = {}): Promise<FastifyInstance> {
+export async function createApp(options: { registry?: ProviderRegistry; history?: HistoryStore; token?: string; modelFile?: string } = {}): Promise<FastifyInstance> {
   const registry = options.registry ?? new ProviderRegistry();
-  const modelCatalog = new ModelCatalog(registry);
+  const modelCatalog = new ModelCatalog(registry, 30_000, options.modelFile);
   const history = options.history ?? new HistoryStore(config.historyMode);
   const token = options.token ?? config.gatewayToken;
   const app = Fastify({ logger: true, bodyLimit: config.maxBodyBytes, requestTimeout: config.requestTimeoutMs, trustProxy: false });
@@ -75,6 +75,28 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
     await registry.refresh();
     return modelsResponse(await modelCatalog.list(providerId(selected)), providerId(selected));
   });
+  app.post<{ Body: { provider?: string; model?: string; display_name?: string } }>("/v1/models", async (request, reply) => {
+    const id = providerId(request.body?.provider); const model = request.body?.model;
+    if (!id || typeof model !== "string") return reply.code(400).send({ error: { message: "provider and model are required", type: "invalid_request_error" } });
+    try { await modelCatalog.add(id, model, request.body?.display_name ?? model); return reply.code(201).send({ data: (await modelCatalog.list(id)).find((item) => item.id === model) }); }
+    catch (error) { return reply.code(400).send({ error: { message: error instanceof Error ? error.message : "Invalid model", type: "invalid_request_error" } }); }
+  });
+  app.patch<{ Body: { provider?: string; model?: string; display_name?: string } }>("/v1/models", async (request, reply) => {
+    const id = providerId(request.body?.provider);
+    if (!id || typeof request.body?.model !== "string" || typeof request.body?.display_name !== "string") return reply.code(400).send({ error: { message: "provider, model, and display_name are required", type: "invalid_request_error" } });
+    try { return await modelCatalog.rename(id, request.body.model, request.body.display_name) ? { ok: true } : reply.code(404).send({ error: { message: "Saved model not found", type: "invalid_request_error" } }); }
+    catch (error) { return reply.code(400).send({ error: { message: error instanceof Error ? error.message : "Invalid model", type: "invalid_request_error" } }); }
+  });
+  app.delete<{ Querystring: { provider?: string; model?: string } }>("/v1/models", async (request, reply) => {
+    const id = providerId(request.query.provider);
+    if (!id || typeof request.query.model !== "string") return reply.code(400).send({ error: { message: "provider and model are required", type: "invalid_request_error" } });
+    return await modelCatalog.remove(id, request.query.model) ? reply.code(204).send() : reply.code(404).send({ error: { message: "Saved model not found", type: "invalid_request_error" } });
+  });
+  app.put<{ Body: { provider?: string; model?: string } }>("/v1/models/default", async (request, reply) => {
+    const id = providerId(request.body?.provider);
+    if (!id || typeof request.body?.model !== "string") return reply.code(400).send({ error: { message: "provider and model are required", type: "invalid_request_error" } });
+    return await modelCatalog.setDefault(id, request.body.model) ? { ok: true, model: request.body.model } : reply.code(404).send({ error: { message: "Model is not in this provider's discovered or saved catalog", type: "invalid_request_error" } });
+  });
   app.get<{ Params: { id: string } }>("/v1/providers/:id/status", async (request, reply) => {
     if (!["codex", "claude", "ollama"].includes(request.params.id)) return reply.code(404).send({ error: { message: "Unknown provider", type: "invalid_request_error" } });
     await registry.refresh();
@@ -84,6 +106,7 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
     host: config.host, port: config.port, requestTimeoutMs: config.requestTimeoutMs,
     maxBodyBytes: config.maxBodyBytes, maxQueue: config.maxQueue,
     historyMode: history.mode, ollamaBaseUrl: config.ollamaBaseUrl,
+    defaultProvider: config.defaultProvider, defaultModel: config.defaultModel, defaultModels: await modelCatalog.defaults(),
     providers: registry.list().map(({ id, executablePath, version, capabilities }) => ({ id, executablePath, version, capabilities }))
   }));
   app.get("/v1/history", async () => ({ object: "list", data: await history.list(), mode: history.mode }));
@@ -134,6 +157,7 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
         responseText = streamed.content;
         providerDurationMs = Number.isFinite(streamed.providerDurationMs) ? streamed.providerDurationMs : undefined;
         usage = streamed.usage;
+        try { await modelCatalog.rememberSuccessful(providerId, input.model); } catch { request.log.warn("Could not persist model catalog entry"); }
         // The provider callback is the source of incremental text; use the returned final text for history only.
         outcome = "success";
         const totalDurationMs = Date.now() - started;
@@ -147,6 +171,7 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
         responseText = completed.content;
         providerDurationMs = Number.isFinite(completed.providerDurationMs) ? completed.providerDurationMs : undefined;
         usage = completed.usage;
+        try { await modelCatalog.rememberSuccessful(providerId, input.model); } catch { request.log.warn("Could not persist model catalog entry"); }
         outcome = "success";
         reply.header("x-subbridge-request-duration-ms", String(Date.now() - started));
         if (providerDurationMs !== undefined) reply.header("x-subbridge-provider-duration-ms", String(providerDurationMs));
@@ -213,15 +238,13 @@ export async function createApp(options: { registry?: ProviderRegistry; history?
   return app;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+export async function startServer(): Promise<FastifyInstance> {
   const registry = new ProviderRegistry();
   await registry.refresh();
   const app = await createApp({ registry });
-  try {
-    await app.listen({ host: config.host, port: config.port });
-    app.log.info(`SubBridge listening at http://${config.host}:${config.port}; local gateway token: ${config.gatewayToken}`);
-  } catch (error) {
-    app.log.error(error);
-    process.exit(1);
-  }
+  await app.listen({ host: config.host, port: config.port });
+  app.log.info(`SubBridge listening at http://${config.host}:${config.port}`);
+  return app;
 }
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await startServer();

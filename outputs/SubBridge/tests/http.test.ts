@@ -39,7 +39,7 @@ async function fixture(provider: Provider = new FakeProvider()) {
     get: (id: ProviderId) => id === "codex" ? provider : undefined
   } as unknown as ProviderRegistry;
   const history = new HistoryStore("full", root);
-  const app = await createApp({ registry, history, token: "test-token" });
+  const app = await createApp({ registry, history, token: "test-token", modelFile: join(root, "models.json") });
   return { app, history, root };
 }
 
@@ -74,6 +74,16 @@ test("REST contracts preserve V1 completion shape and protect provider/settings/
     const models = await app.inject({ method: "GET", url: "/v1/models?provider=codex", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" } });
     assert.equal(models.json().object, "list");
     assert.deepEqual(models.json().data, []);
+    const added = await app.inject({ method: "POST", url: "/v1/models", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" }, payload: { provider: "codex", model: "saved-model", display_name: "Saved" } });
+    assert.equal(added.statusCode, 201);
+    assert.equal(added.json().data.availability, "unknown");
+    const defaulted = await app.inject({ method: "PUT", url: "/v1/models/default", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" }, payload: { provider: "codex", model: "saved-model" } });
+    assert.equal(defaulted.statusCode, 200);
+    const renamed = await app.inject({ method: "PATCH", url: "/v1/models", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" }, payload: { provider: "codex", model: "saved-model", display_name: "Renamed" } });
+    assert.equal(renamed.statusCode, 200);
+    assert.equal((await app.inject({ method: "GET", url: "/v1/models?provider=codex", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" } })).json().data[0].is_default, true);
+    const removed = await app.inject({ method: "DELETE", url: "/v1/models?provider=codex&model=saved-model", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" } });
+    assert.equal(removed.statusCode, 204);
     const badModels = await app.inject({ method: "GET", url: "/v1/models?provider=../../evil", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" } });
     assert.equal(badModels.statusCode, 400);
     const response = await app.inject({ method: "POST", url: "/v1/chat/completions", headers: { host: "127.0.0.1:8787", authorization: "Bearer test-token" }, payload: { model: "gpt-6-luna", messages: [{ role: "user", content: "hi" }] } });

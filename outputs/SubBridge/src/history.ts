@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { dataDirectory } from "./paths.js";
 import type { ProviderId, UsageMetrics } from "./providers/types.js";
 
 export interface HistoryRecord {
@@ -19,10 +19,7 @@ export interface HistoryRecord {
 }
 
 function defaultDirectory(): string {
-  if (process.env.SUBBRIDGE_DATA_DIR) return process.env.SUBBRIDGE_DATA_DIR;
-  if (process.platform === "win32") return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "SubBridge");
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "SubBridge");
-  return join(process.env.XDG_STATE_HOME ?? join(homedir(), ".local", "state"), "subbridge");
+  return dataDirectory();
 }
 
 export class HistoryStore {

@@ -1,39 +1,47 @@
-# Use SubBridge from another project
+# Getting started
 
-SubBridge is a local gateway for provider adapters already installed on your machine. It listens on `http://127.0.0.1:8787` by default and requires the local gateway bearer token for every `/v1` request.
+SubBridge runs a local authenticated HTTP gateway for the provider adapters it implements. Node.js 22.12+ and npm are required. Use an authenticated Codex CLI or a running Ollama service.
 
-## Install and start
-
-Requirements: Node.js 22.12 or newer, npm, and either an authenticated Codex CLI or a running local Ollama server.
+## Source checkout
 
 ```sh
-git clone <your-subbridge-repository>
-cd SubBridge
 npm install
 npm run setup
-npm run dev
+npm run build
+npm start
 ```
 
-The setup wizard creates `.env` with a generated token and safe loopback defaults. Keep the token private. `npm run dev` starts the API and dashboard; `npm run build && npm start` serves the production build. The dashboard is at `http://127.0.0.1:8787` in production, and the API base is `http://127.0.0.1:8787/v1`.
+The wizard scans providers, checks supported authentication state without inference, binds to `127.0.0.1`, and stores a generated token in the per-user configuration directory. It does not print the token. Find `SUBBRIDGE_TOKEN` in that private `.env` file and enter it in the dashboard at `http://127.0.0.1:8787`. To preserve the token outside the source tree use the default per-user configuration; `SUBBRIDGE_CONFIG_DIR` can override it.
 
-Set `SUBBRIDGE_TOKEN` in the calling application's environment to the same value as `SUBBRIDGE_GATEWAY_TOKEN` in SubBridge's `.env`. Do not put the token in browser code or commit it. The dashboard asks for it and keeps it in the current tab's session storage.
-
-## Check providers and models
+For a local package build, run `npm pack`, then install the resulting tarball in a clean directory. The package is not published to npm; public `npx subbridge` commands are not available until publication.
 
 ```sh
-curl -H "Authorization: Bearer $SUBBRIDGE_TOKEN" http://127.0.0.1:8787/v1/providers
-curl -H "Authorization: Bearer $SUBBRIDGE_TOKEN" http://127.0.0.1:8787/v1/models
+subbridge providers
+subbridge models
+subbridge doctor --json
 ```
 
-`/v1/models` returns only IDs advertised by an implemented provider. Ollama models come from its local `/api/tags` endpoint. The Codex CLI currently has no documented model-catalog command, so Codex model discovery is empty; use an explicit Codex-supported model ID in that case. The example `gpt-6-luna` below is not guaranteed to be available to your account.
+These commands inspect actual local state; they do not run an inference. Codex currently has no documented catalog command. SubBridge remembers a model after successful inference and lets you add a manual catalog entry, labeled unverified until it succeeds. Ollama discovery uses its running local API.
 
-## First request
+## Authenticate and request
+
+Provider authentication remains with Codex CLI's supported login or Ollama's local service. SubBridge's gateway bearer token is a separate caller credential. Set the token and a model ID known to your provider in the client environment, then:
 
 ```sh
 curl http://127.0.0.1:8787/v1/chat/completions \
   -H "Authorization: Bearer $SUBBRIDGE_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-6-luna","messages":[{"role":"user","content":"Hello from my app!"}]}'
+  -d '{"model":"<provider-model-id>","messages":[{"role":"user","content":"Hello from my app!"}]}'
 ```
 
-Use a model supported by the provider selected in the request (`codex` is the default; `ollama` can be selected with `"provider":"ollama"`). The response is an OpenAI-shaped chat completion subset. See [API reference](api-reference.md), [integration examples](integrations.md), and [deployment and security](deployment-security.md).
+`<provider-model-id>` is a placeholder; no model ID is substituted automatically. A sample configured Codex account may support `gpt-6-luna`, but availability depends on that account and provider. Read [integration examples](integrations.md), [API subset](api-reference.md), and [security and private access](deployment-security.md).
+
+## Errors
+
+- **401:** bad/missing SubBridge token, or provider login required on completion.
+- **502:** provider failure or unsupported model; check local provider status and model support.
+- **504:** request exceeded `SUBBRIDGE_REQUEST_TIMEOUT_MS`.
+- **429:** local rate or queue limit reached; SubBridge does not retry automatically.
+- **No models:** use manual model entry or run an Ollama discovery refresh; a Codex ID becomes verified after a successful request.
+
+Prompts may leave the machine when a cloud provider is selected. Confirm provider terms, usage allowance, and integration policies; personal/open-source use does not override them.

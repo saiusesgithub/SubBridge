@@ -39,7 +39,10 @@ export interface DiscoveredModel {
   owned_by: ProviderId;
   display_name: string;
   provider: ProviderId;
-  available: true;
+  origin: "provider-advertised" | "manual" | "successful-inference";
+  availability: "advertised" | "verified" | "unknown";
+  verified_at: string | null;
+  is_default: boolean;
   capabilities: { completion: boolean; streaming: boolean };
 }
 

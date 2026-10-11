@@ -1,19 +1,23 @@
 {
   "name": "subbridge",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "A local-first AI gateway for Codex CLI and Ollama.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=22.12"
   },
+  "bin": { "subbridge": "bin/subbridge.js" },
+  "files": ["bin/", "dist/", "web/dist/", "docs/", "README.md", "SUBMISSION.md", "DEMO.md", "RELEASE_CHECKLIST.md", "LICENSE"],
+  "publishConfig": { "access": "public" },
   "scripts": {
     "setup": "tsx scripts/setup.ts",
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/index.ts\" \"vite --host 127.0.0.1\"",
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json && vite build",
-    "start": "node dist/index.js",
-    "test": "tsx --test tests/*.test.ts"
+    "start": "node dist/cli.js start",
+    "test": "tsx --test tests/*.test.ts",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@fastify/static": "^10.1.6",
