@@ -1,0 +1,20 @@
+{
+  "name": "subbridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first, OpenAI-shaped gateway for Codex CLI.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": { "fastify": "^5.2.1" },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
