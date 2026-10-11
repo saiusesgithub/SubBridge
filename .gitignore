@@ -1,0 +1,28 @@
+# Dependencies and generated builds
+node_modules/
+**/node_modules/
+**/dist/
+**/coverage/
+**/.vercel/
+*.tsbuildinfo
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+**/auth.json
+**/credentials.json
+
+# Local state, logs, and archives
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.tgz
+**/subbridge-history.json
+**/models.json
+.DS_Store
+Thumbs.db

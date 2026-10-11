@@ -1,0 +1,22 @@
+{
+  "name": "subbridge-monorepo",
+  "private": true,
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install-apps.mjs",
+    "install:apps": "node scripts/install-apps.mjs",
+    "build": "npm run build:gateway && npm run build:showcase",
+    "test": "npm run test:gateway && npm run test:showcase",
+    "build:gateway": "npm run build --prefix apps/gateway",
+    "build:showcase": "npm run build --prefix apps/showcase",
+    "test:gateway": "npm test --prefix apps/gateway",
+    "test:showcase": "npm test --prefix apps/showcase",
+    "dev:gateway": "npm run dev --prefix apps/gateway",
+    "dev:showcase": "npm run dev --prefix apps/showcase",
+    "setup:gateway": "npm run setup --prefix apps/gateway",
+    "start:gateway": "npm run start --prefix apps/gateway",
+    "pack:gateway": "node scripts/pack-gateway.mjs"
+  }
+}
